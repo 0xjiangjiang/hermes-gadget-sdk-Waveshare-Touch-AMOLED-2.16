@@ -1,4 +1,4 @@
-// CST9217 touchscreen and a key mirrored on a TCA9554 expander, polled over
+// Touch controllers and a key mirrored on a TCA9554 expander, polled over
 // I2C from their own task. Samples become Touch and Key events; the app task
 // turns them into gestures (hg::TouchGestures) and button presses.
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "esp_lcd_touch_gt911.h"
 #include "esp_lcd_touch_tt21100.h"
+#include "esp_lcd_touch_ft5x06.h"
 #include "freertos/task.h"
 
 namespace hgp {
@@ -25,7 +26,22 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i
   if (!bus) return false;
   touch_ = touch;
   key_ = key;
-  if (touch.enabled && touch.controller == TouchController::Box3) {
+  if (touch.enabled && touch.controller == TouchController::Ft5x06) {
+    esp_lcd_panel_io_i2c_config_t io_cfg = {};
+    io_cfg.dev_addr = ESP_LCD_TOUCH_IO_I2C_FT5x06_ADDRESS;
+    io_cfg.scl_speed_hz = 100000;
+    io_cfg.control_phase_bytes = 1;
+    io_cfg.lcd_cmd_bits = 8;
+    io_cfg.flags.disable_control_phase = 1;
+    esp_lcd_panel_io_handle_t io = nullptr;
+    esp_lcd_touch_config_t cfg = {};
+    cfg.x_max = touch.width;
+    cfg.y_max = touch.height;
+    cfg.rst_gpio_num = GPIO_NUM_NC;  // The board's expander already released reset.
+    cfg.int_gpio_num = GPIO_NUM_NC;
+    if (esp_lcd_new_panel_io_i2c(bus, &io_cfg, &io) == ESP_OK &&
+        esp_lcd_touch_new_i2c_ft5x06(io, &cfg, &managed_touch_) != ESP_OK) esp_lcd_panel_io_del(io);
+  } else if (touch.enabled && touch.controller == TouchController::Box3) {
     begin_box_touch(bus);
   } else if (touch.enabled) {
     if (touch.rst >= 0) {
