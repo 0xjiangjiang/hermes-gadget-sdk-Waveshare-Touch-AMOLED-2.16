@@ -1,3 +1,9 @@
+if(NOT CMAKE_SCRIPT_MODE_FILE)
+    file(READ "${CMAKE_CURRENT_LIST_DIR}/wifi_setup.html" HG_WIFI_SETUP_HTML)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/wifi_setup.html")
+    configure_file(wifi_setup_page.hpp.in wifi_setup_page.hpp @ONLY)
+endif()
+
 idf_component_register(
     SRCS
         "main.cpp"
@@ -18,8 +24,9 @@ idf_component_register(
         "port_system.cpp"
         "port_touch.cpp"
         "port_wifi.cpp"
+        "port_wifi_setup.cpp"
         "port_ws.cpp"
-    INCLUDE_DIRS "." "../../drivers"
+    INCLUDE_DIRS "." "../../drivers" "${CMAKE_CURRENT_BINARY_DIR}"
     REQUIRES core
     # "driver" pulls in GPIO, I2S, LEDC and SPI on every ESP-IDF 5.x release.
     # ESP-IDF 6.x dropped I2S and LEDC from that catch-all, so name them too;
@@ -34,6 +41,7 @@ idf_component_register(
         esp_event
         esp_lcd
         esp_netif
+        esp_http_server
         esp_psram
         esp_timer
         esp_wifi
