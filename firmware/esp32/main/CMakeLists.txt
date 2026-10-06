@@ -15,6 +15,8 @@ idf_component_register(
         "port_cores3.cpp"
         "port_console.cpp"
         "port_diag.cpp"
+        "port_imu.cpp"
+        "port_wakeword.cpp"
         "port_display.cpp"
         "port_events.cpp"
         "port_ota.cpp"
@@ -51,4 +53,6 @@ idf_component_register(
         nvs_flash
         mbedtls
         esp_websocket_client
+        SensorLib
+        espressif__esp-sr
 )

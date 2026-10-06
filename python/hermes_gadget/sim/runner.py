@@ -50,6 +50,8 @@ BOARDS = {
     "sim-240x240": Board("sim-240x240", 240, 240, scroll_buttons=False),
     # A 1.75" round 466x466 AMOLED touch board (e.g. ESP32-S3-Touch-AMOLED-1.75): no scroll buttons.
     "sim-466x466-round": Board("sim-466x466-round", 466, 466, scroll_buttons=False, round=True, touch=True),
+    # A 2.16" square 480x480 AMOLED touch board (e.g. ESP32-S3-Touch-AMOLED-2.16): no scroll buttons.
+    "sim-480x480": Board("sim-480x480", 480, 480, scroll_buttons=False, touch=True),
 }
 
 

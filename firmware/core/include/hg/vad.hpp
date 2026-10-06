@@ -21,8 +21,8 @@ class Vad {
     uint32_t sample_rate = 16000;
     uint32_t end_silence_ms = 900;   // silence after speech that ends the utterance
     uint32_t no_speech_ms = 6000;    // give up if nobody speaks at all
-    float min_threshold = 500.0f;    // absolute RMS floor for "speech"
-    float noise_ratio = 3.0f;        // speech must exceed noise floor * ratio
+    float min_threshold = 60.0f;     // absolute RMS floor for "speech"
+    float noise_ratio = 1.6f;        // speech must exceed noise floor * ratio
   };
 
   enum class Result : uint8_t { Continue, EndOfSpeech, NoSpeech };

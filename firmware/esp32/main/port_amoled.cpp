@@ -120,6 +120,8 @@ bool AmoledDisplay::begin(const AmoledConfig& cfg) {
     command(c.cmd, c.data, c.len);
     if (c.delay_ms) vTaskDelay(pdMS_TO_TICKS(c.delay_ms));
   }
+  // Panel orientation: 0xA0 rotates 90° (the 2.16" module's factory setting).
+  if (cfg.madctl != 0x00) command(0x36, &cfg.madctl, 1);
   ESP_LOGI(TAG, "CO5300 %ux%u ready", cfg.width, cfg.height);
   return true;
 }
@@ -159,6 +161,11 @@ void AmoledDisplay::flush(uint16_t y0, uint16_t y1) {
 void AmoledDisplay::set_backlight(uint8_t percent) {
   const uint8_t level = static_cast<uint8_t>(255u * std::min<uint8_t>(percent, 100) / 100u);
   command(0x51, &level, 1);
+}
+
+void AmoledDisplay::set_orientation(uint8_t r) {
+  if (!io_ || r >= kRotationCount) return;
+  command(0x36, &kRotationMadctl[r], 1);
 }
 
 }  // namespace hgp

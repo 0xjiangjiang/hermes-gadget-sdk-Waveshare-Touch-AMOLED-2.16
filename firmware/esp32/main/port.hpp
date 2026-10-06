@@ -33,14 +33,34 @@
 #include "hg/app.hpp"
 #include "hg/hal.hpp"
 #include "hg/setup.hpp"
+#include "SensorQMI8658.hpp"  // QMI8658 driver (SensorLib), for auto-rotation
 
 namespace hgp {
+
+// ---------------------------------------------------------------------------
+// Panel rotation
+//
+// The four proper 90° rotations of a square CO5300 panel: the MADCTL value to
+// send, and the matching touch transform (applied mirror-first, then swap).
+// Index 3 (0xA0) is the 2.16" board's factory orientation. Rotation 0 means
+// the framebuffer's -Y axis points up, 1 that it points along raw +X, and so
+// on counter-clockwise.
+struct RotationTouchMap {
+  bool mirror_x, mirror_y, swap_xy;
+};
+constexpr uint8_t kRotationCount = 4;
+constexpr uint8_t kRotationMadctl[kRotationCount] = {0x00, 0x60, 0xC0, 0xA0};
+constexpr RotationTouchMap kRotationTouch[kRotationCount] = {{false, false, false}, {false, true, true},
+                                                            {true, true, false}, {true, false, true}};
+// The rotation the 2.16" board starts with; kRotationMadctl index of its
+// factory MADCTL. Boards whose madctl is not in the table cannot auto-rotate.
+constexpr uint8_t kRotationDefault = 3;
 
 // ---------------------------------------------------------------------------
 // Events
 
 enum class EventType : uint8_t { NetUp, NetDown, WsOpen, WsText, WsBinary, WsClosed, Mic, Console, Touch, Key,
-                                 WifiStarted, WifiDisconnected, WifiProvision };
+                                 Rotate, Wake, WifiStarted, WifiDisconnected, WifiProvision };
 
 // Payloads of Touch and Key events (posted by the input task).
 struct TouchSample {
@@ -179,6 +199,9 @@ class AmoledDisplay final : public hg::Display {
   uint16_t* framebuffer() override { return fb_; }
   void flush(uint16_t y0, uint16_t y1) override;
   void set_backlight(uint8_t percent) override;
+  // Sends the panel's MADCTL for rotation index r (kRotationMadctl). App task
+  // only, like flush: the panel IO queue is not protected against other tasks.
+  void set_orientation(uint8_t r);
 
  private:
   static bool on_trans_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t* edata, void* ctx);
@@ -248,6 +271,10 @@ class TouchInput {
   bool begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i2c_master_bus_handle_t bus);
   bool has_touch() const { return touch_dev_ != nullptr || managed_touch_ != nullptr; }
   bool has_key() const { return key_dev_ != nullptr; }
+  // Switches raw->screen mapping to rotation index r (kRotationTouch). Safe
+  // from any task; the poll task picks it up on its next sample. Once called
+  // the board's static mapping is overridden until reboot.
+  void set_orientation(uint8_t r);
 
  private:
   static void task(void* arg);
@@ -256,15 +283,60 @@ class TouchInput {
   bool read_key(bool& pressed);
   TouchConfig touch_{};
   ExpanderKeyConfig key_{};
+  std::atomic<uint8_t> orientation_{0};
+  std::atomic<bool> dynamic_orientation_{false};
   i2c_master_dev_handle_t touch_dev_ = nullptr;
   i2c_master_dev_handle_t key_dev_ = nullptr;
   esp_lcd_touch_handle_t managed_touch_ = nullptr;
 };
 
+class Qmi8658 {
+ public:
+  // Probes addr (falling back to the chip's other address) and enables the
+  // accelerometer at ±2 g / 31.25 Hz with the low-pass filter on.
+  bool begin(const ImuConfig& cfg, i2c_master_bus_handle_t bus);
+  // Gravity in g. Fails (leaving the samples untouched) on any bus error.
+  bool read_accel(float out[3]);
+
+ private:
+  SensorQMI8658 chip_;
+};
+// Display auto-rotation: a QMI8658 poll task posts Rotate events, and the
+// fixed-rotation setting applies a rotation right away. All functions are
+// app-task safe; the poll task only talks to the IMU and posts events.
+namespace imu {
+// Probes the chip (logging when absent) and remembers how to apply rotations.
+// The board's MADCTL must be one of kRotationMadctl; returns false when no
+// IMU answered or the panel's native orientation is not rotatable this way.
+bool begin(const ImuConfig& cfg, i2c_master_bus_handle_t bus, AmoledDisplay* display, TouchInput* touch,
+           uint8_t initial_madctl);
+// rotation setting: "auto" (default) or "0"/"90"/"180"/"270". Applies the
+// fixed value at once and starts/stops the poll task.
+void apply_setting(std::string_view value);
+// The Rotate event's half: applies the new orientation (app task).
+void on_rotate_event(uint8_t index);
+// Current rotation index and mode, for `diag`.
+hg::json::Value describe();
+}  // namespace imu
+
+// Wake word detection (ESP-SR WakeNet) over the microphone stream the
+// CodecMic task already reads; a detection becomes a hands-free talk press.
+namespace wake {
+// Loads the model compiled into the image; false when absent or out of memory.
+bool begin();
+// The `wake_word` setting ("on"/"off").
+void set_enabled(bool on);
+bool enabled();
+// Feeds one 20 ms microphone block; true when the wake word fired (at most
+// once per few seconds — detections right after one are ignored).
+bool feed(const int16_t* samples, size_t count);
+}  // namespace wake
+
 class AxpPower final : public hg::Power {
  public:
   bool begin(i2c_master_bus_handle_t bus);
   bool enable_audio_supply() { return chip_ && chip_->enable_aldo1_3v3(); }
+  bool enable_display_supply() { return chip_ && chip_->enable_aldo3_3v3(); }
   std::optional<hg::PowerStatus> read() override { return chip_->read(); }
   bool power_off() override { return chip_->power_off(); }
 
@@ -380,6 +452,7 @@ struct Parts {
   const char* display = "none";
   const char* mic = "none";
   const char* speaker = "none";
+  const char* imu = "none";
   bool touch = false;
   bool key = false;
   i2c_master_bus_handle_t i2c = nullptr;  // scanned by `diag`

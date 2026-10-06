@@ -67,6 +67,10 @@ class App {
 
   void begin();
   void tick();
+  // Repaints every band on the next render: needed after the panel's
+  // orientation changed, when partial band flushes would leave old pixels
+  // showing at the new positions.
+  void request_full_redraw();
 
   // --- events from the port -------------------------------------------------
   void on_network(bool up, std::string_view detail = {});

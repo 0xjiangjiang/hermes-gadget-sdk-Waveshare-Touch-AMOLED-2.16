@@ -79,6 +79,12 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i
   return true;
 }
 
+void TouchInput::set_orientation(uint8_t r) {
+  if (r >= kRotationCount) return;
+  orientation_.store(r);
+  dynamic_orientation_.store(true);
+}
+
 bool TouchInput::read_touch(TouchSample& out) {
   if (managed_touch_) {
     if (esp_lcd_touch_read_data(managed_touch_) != ESP_OK) return false;
@@ -99,8 +105,17 @@ bool TouchInput::read_touch(TouchSample& out) {
   const bool down = points > 0 && (buf[0] & 0x0F) == 0x06;
   int x = (buf[1] << 4) | (buf[3] >> 4);
   int y = (buf[2] << 4) | (buf[3] & 0x0F);
-  if (touch_.mirror_x && touch_.width) x = touch_.width - 1 - x;
-  if (touch_.mirror_y && touch_.height) y = touch_.height - 1 - y;
+  // Auto-rotating boards swap this mapping with the panel's MADCTL; boards
+  // without an IMU keep the static one from the board description.
+  RotationTouchMap map{};
+  if (dynamic_orientation_.load()) {
+    map = kRotationTouch[orientation_.load()];
+  } else {
+    map = {touch_.mirror_x, touch_.mirror_y, touch_.swap_xy};
+  }
+  if (map.mirror_x && touch_.width) x = touch_.width - 1 - x;
+  if (map.mirror_y && touch_.height) y = touch_.height - 1 - y;
+  if (map.swap_xy) { const int t = x; x = y; y = t; }  // after mirroring, as the CST9217 driver does
   out = {down, static_cast<int16_t>(x), static_cast<int16_t>(y)};
   return true;
 }

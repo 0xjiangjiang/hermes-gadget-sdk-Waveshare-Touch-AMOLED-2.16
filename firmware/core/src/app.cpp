@@ -99,7 +99,7 @@ void App::load_settings() {
   server_url_ = setting("server", profile_.default_server_url);
   access_token_ = setting("token", profile_.default_access_token);
   talk_mode_ = setting("talk_mode", "hold") == "tap" ? TalkMode::Tap : TalkMode::Hold;
-  int vol = std::atoi(setting("volume", "70").c_str());
+  int vol = std::atoi(setting("volume", "100").c_str());
   volume_ = static_cast<uint8_t>(std::max(0, std::min(100, vol)));
   if (hal_.speaker) hal_.speaker->set_volume(volume_);
   brightness_ = static_cast<uint8_t>(std::max(5, std::min(100, std::atoi(setting("brightness", "100").c_str()))));
@@ -296,7 +296,9 @@ void App::send_hello() {
   if (hal_.display) {
     DisplayInfo di = hal_.display->info();
     json::Value d = json::Value::object();
-    d.set("width", di.width).set("height", di.height).set("color", true).set("charset", "ascii");
+    // The core embeds the GB2312-1 bitmap font, so every board renders CJK text;
+// the server passes it through instead of folding it to ASCII.
+d.set("width", di.width).set("height", di.height).set("color", true).set("charset", "gb2312");
     if (di.round) d.set("shape", "round");
     if (ui_) {
       const UiLayout& l = ui_->layout();
@@ -1331,6 +1333,11 @@ void App::tick() {
     ++model_.frame;
     update_model();
   }
+}
+
+void App::request_full_redraw() {
+  if (ui_) ui_->invalidate();
+  update_model();
 }
 
 void App::update_model() {

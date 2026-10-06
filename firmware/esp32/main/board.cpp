@@ -14,6 +14,8 @@ namespace {
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75"
 #elif CONFIG_HG_BOARD_AMOLED_175C
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75c"
+#elif CONFIG_HG_BOARD_AMOLED_216
+#define HG_BOARD_NAME "esp32s3-touch-amoled-2.16"
 #elif CONFIG_HG_BOARD_BOX3
 #define HG_BOARD_NAME "esp32-s3-box-3"
 #elif CONFIG_HG_BOARD_CORES3
@@ -95,6 +97,58 @@ BoardConfig make() {
   b.pwr_key = {};  // This model has no TCA9554. PWR retains its hardware role.
   b.axp_audio_supply = true;  // ALDO1 supplies the analog audio circuit.
 #endif
+  return b;
+}
+#elif CONFIG_HG_BOARD_AMOLED_216
+// Waveshare ESP32-S3-Touch-AMOLED-2.16: square 480x480 AMOLED (CO5300, QSPI,
+// MADCTL 0xA0), CST9220 touch, ES8311 + ES7210 codecs, AXP2101 PMIC (the
+// display rail is ALDO3). Pins: AgentTouch firmware/src/pins.h + Waveshare BSP.
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.amoled.enabled = true;
+  b.amoled.width = 480;
+  b.amoled.height = 480;
+  b.amoled.cs = 12;
+  b.amoled.sclk = 38;
+  b.amoled.d0 = 4;
+  b.amoled.d1 = 5;
+  b.amoled.d2 = 6;
+  b.amoled.d3 = 7;
+  b.amoled.rst = 39;
+  b.amoled.madctl = 0xA0;
+  b.i2c = {15, 14, 400000};
+  b.codec.enabled = true;
+  b.codec.mclk = 42;
+  b.codec.bclk = 9;
+  b.codec.ws = 45;
+  b.codec.dout = 8;
+  b.codec.din = 10;
+  b.codec.pa = 46;
+  b.touch.enabled = true;
+  b.touch.addr = 0x5A;  // CST9220
+  b.touch.rst = 40;
+  b.touch.width = 480;
+  b.touch.height = 480;
+  // The ES7210 capsules pick up speech at only ~2-3x the noise floor at desk
+  // distance (measured peak 150 vs ambient 45); run the PGA at its max so the
+  // energy VAD has headroom. esp_codec_dev maps this to GAIN_37_5DB.
+  b.codec.mic_gain_db = 37.5f;
+  // Panel MADCTL 0xA0 rotates 90°: screen_x = raw_y, screen_y = 479 - raw_x
+  // (the AgentTouch firmware's verified mapping; same order as the CST9217
+  // driver: mirror first, then swap).
+  b.touch.mirror_x = true;
+  b.touch.mirror_y = false;
+  b.touch.swap_xy = true;
+  // QMI8658 on the shared bus (INT1/INT2 on GPIO 17/21 are unused; the
+  // accelerometer is polled). Its X/Y axes face the panel's native frame, so
+  // auto-rotation can map gravity straight onto kRotationMadctl.
+  b.imu.enabled = true;
+  b.axp2101 = true;
+  b.axp_display_supply = true;  // ALDO3 is the display rail: raise it before panel bring-up.
+  b.buttons = {0, 18, -1, -1};  // BOOT = TALK, IO18 = CANCEL
+  b.talk_label = "BOOT";
+  b.cancel_label = "IO18";
   return b;
 }
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154

@@ -36,7 +36,7 @@ class Canvas {
   void arc(int cx, int cy, int r, int thickness, int dir, uint16_t color);
   // 1-bit bitmap (row-major, MSB first, rows padded to bytes): set bits are
   // drawn in `color`, clear bits are left untouched.
-  void bitmap1(int x, int y, int w, int h, const uint8_t* bits, uint16_t color);
+  void bitmap1(int x, int y, int w, int h, const uint8_t* bits, uint16_t color, int scale = 1);
 
   // Text at an integer scale; returns the x after the last glyph.
   int text(int x, int y, std::string_view s, int scale, uint16_t color);

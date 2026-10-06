@@ -1,0 +1,6 @@
+{
+  "title": "Waveshare ESP32-S3-Touch-AMOLED-2.16",
+  "summary": "Square 2.16\" AMOLED touchscreen, two microphones and an onboard speaker.",
+  "docs": "docs/hardware.md#esp32s3-touch-amoled-216",
+  "ready_made": true
+}

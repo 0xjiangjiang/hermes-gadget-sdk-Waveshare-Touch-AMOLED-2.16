@@ -40,6 +40,7 @@ struct AmoledConfig {
   int gap_x = 0, gap_y = 0;  // the controller's RAM is wider than the glass
   int qspi_mhz = 40;
   bool round = false;
+  uint8_t madctl = 0x00;  // panel orientation command (0xA0 rotates 90°)
 };
 
 struct I2cBusConfig {
@@ -60,6 +61,13 @@ struct CodecAudioConfig {
   SpeakerCodec speaker = SpeakerCodec::Es8311;
 };
 
+// 6-axis IMU on the board's shared I2C bus (e.g. the QMI8658), polled to
+// auto-rotate square panels. Interrupt pins are left unused.
+struct ImuConfig {
+  bool enabled = false;
+  uint8_t addr = 0x6B;
+};
+
 // Capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
 enum class TouchController { Cst9217, Box3, Ft5x06 };
 
@@ -68,7 +76,7 @@ struct TouchConfig {
   uint8_t addr = 0x5A;
   int rst = -1;
   uint16_t width = 0, height = 0;
-  bool mirror_x = false, mirror_y = false;
+  bool mirror_x = false, mirror_y = false, swap_xy = false;
   TouchController controller = TouchController::Cst9217;
 };
 
@@ -98,11 +106,13 @@ struct BoardConfig {
   ButtonConfig buttons;
   AmoledConfig amoled;
   I2cBusConfig i2c;
+  ImuConfig imu;
   CodecAudioConfig codec;
   TouchConfig touch;
   ExpanderKeyConfig pwr_key;
   bool axp2101 = false;
   bool axp_audio_supply = false;
+  bool axp_display_supply = false;
   bool cores3 = false;
   LatchPowerConfig latch_power;
   int status_led = -1;

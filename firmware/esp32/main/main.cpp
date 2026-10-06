@@ -133,6 +133,27 @@ void dispatch(hg::App& app, hgp::Event& ev) {
         app.on_button(hg::Button::Cancel, reinterpret_cast<const hgp::KeySample*>(ev.data)->pressed);
       }
       break;
+    case EventType::Wake: {
+      // The wake word fired between conversations; tap-style talk with the
+      // core's own VAD endpointing takes it from here. Any screen that is
+      // not an active modal counts — a leftover reply on screen must not
+      // swallow the wake word.
+      const auto screen = app.model().screen;
+      const bool modal = screen == hg::Screen::Setup || screen == hg::Screen::Updating ||
+                         screen == hg::Screen::Prompt || screen == hg::Screen::Settings;
+      ESP_LOGI("hg.wake", "wake event on screen %d%s", static_cast<int>(screen), modal ? " (modal, ignored)" : "");
+      if (!modal) app.on_button(hg::Button::Talk, true);
+      break;
+    }
+    case EventType::Rotate:
+      // The IMU poll task has settled on a new orientation; the app task owns
+      // the panel and the touch mapping, so apply it here and repaint every
+      // band: partial flushes would mix old and new pixels.
+      if (ev.len == 1) {
+        hgp::imu::on_rotate_event(ev.data[0]);
+        app.request_full_redraw();
+      }
+      break;
   }
 }
 
@@ -172,13 +193,15 @@ extern "C" void app_main(void) {
   if (g_updater.capacity()) hal.updater = &g_updater;
   i2c_master_bus_handle_t i2c_bus = hgp::i2c::bus(board.i2c);
   const bool peripherals_ready = !board.cores3 || g_cores3.begin(i2c_bus);
+  if (board.axp2101 && g_power.begin(i2c_bus)) hal.power = &g_power;
+  const bool display_power = !board.axp_display_supply || g_power.enable_display_supply();
+  if (board.axp_display_supply && !display_power) ESP_LOGE(TAG, "display supply unavailable");
   if (board.cores3 && peripherals_ready)
     g_display.board_backlight = [](uint8_t percent) { g_cores3.set_backlight(percent); };
   if (peripherals_ready && board.lcd.enabled && g_display.begin(board.lcd, i2c_bus)) hal.display = &g_display;
-  else if (board.amoled.enabled && g_amoled.begin(board.amoled)) hal.display = &g_amoled;
+  else if (board.amoled.enabled && display_power && g_amoled.begin(board.amoled)) hal.display = &g_amoled;
   if (board.mic.enabled && g_mic.begin(board.mic)) hal.mic = &g_mic;
   if (board.speaker.enabled && g_speaker.begin(board.speaker)) hal.speaker = &g_speaker;
-  if (board.axp2101 && g_power.begin(i2c_bus)) hal.power = &g_power;
   const bool audio_power = peripherals_ready && (!board.axp_audio_supply || g_power.enable_audio_supply());
   if (!audio_power) ESP_LOGE(TAG, "audio supply unavailable");
   if (board.codec.enabled && audio_power && g_codec.begin(board.codec, i2c_bus)) {
@@ -198,6 +221,9 @@ extern "C" void app_main(void) {
   parts.touch = touch && g_touch.has_touch();
   parts.key = touch && g_touch.has_key();
   parts.i2c = i2c_bus;
+  if (board.imu.enabled && hal.display == &g_amoled &&
+      hgp::imu::begin(board.imu, i2c_bus, &g_amoled, &g_touch, board.amoled.madctl))
+    parts.imu = "qmi8658";
   hgp::diag::set_parts(parts);
   hgp::diag::log_boot_summary();
 
@@ -213,7 +239,7 @@ extern "C" void app_main(void) {
   profile.cancel_label = board.cancel_label;
   if (touch && board.touch.enabled) {
     profile.touch_screen = true;
-    profile.extra_settings = {"touch_cancel"};
+    profile.extra_settings = {"touch_cancel", "rotation", "wake_word"};
   }
   if (hal.mic == &g_codec_mic) profile.mic_rate = hgp::CodecAudio::kRate;
   if (hal.speaker == &g_codec_speaker) profile.speaker_rate = hgp::CodecAudio::kRate;
@@ -222,16 +248,26 @@ extern "C" void app_main(void) {
   static hg::TouchGestures gestures(app);
   if (profile.touch_screen) g_gestures = &gestures;
   apply_touch_cancel();
+  if (hal.mic == &g_codec_mic) hgp::wake::begin();
+  hgp::wake::set_enabled(g_storage.get("wake_word").value_or("off") == "on");
+  hgp::imu::apply_setting(g_storage.get("rotation").value_or("auto"));
+  app.request_full_redraw();  // the panel may boot into a stored fixed orientation
   add_status_led(app, board.status_led);
   app.on_setting_changed = [](std::string_view key) {
     if (key == "wifi_ssid" || key == "wifi_pass") { app.close_wifi_setup(); g_wifi.reconfigure(); }
     if (key == "touch_cancel") apply_touch_cancel();
+    if (key == "rotation") {
+      hgp::imu::apply_setting(g_storage.get("rotation").value_or("auto"));
+      app.request_full_redraw();
+    }
+    if (key == "wake_word") hgp::wake::set_enabled(g_storage.get("wake_word").value_or("off") == "on");
   };
   app.on_wifi_setup = [] { return g_wifi.start_setup(); };
   app.on_wifi_setup_close = [] { g_wifi.stop_setup(); };
   app.on_diag = [](hg::json::Value& report) {
     hgp::diag::report(report);
     report.set("ota", g_updater.describe());
+    report.set("rotation", hgp::imu::describe());
   };
   app.recent_log = &hgp::diag::recent_log;
   app.begin();

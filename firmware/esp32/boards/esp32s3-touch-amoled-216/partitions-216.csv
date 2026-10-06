@@ -1,0 +1,12 @@
+# 2.16" board (16 MB flash): the stock table plus a 1 MB "model" partition at
+# 4 MB for the ESP-SR wake word model (partitions-216.csv, see the board's
+# sdkconfig.defaults). The app slots and NVS keep their offsets, so OTA and
+# settings survive the switch; the model image itself is flashed once over USB
+# (build_dir/srmodels/srmodels.bin at 0x400000).
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x6000
+otadata,  data, ota,     0xf000,   0x2000
+phy_init, data, phy,     0x11000,  0x1000
+ota_0,    app,  ota_0,   0x20000,  0x1f0000
+ota_1,    app,  ota_1,   0x210000, 0x1f0000
+model,    data, spiffs,  0x400000, 0x100000

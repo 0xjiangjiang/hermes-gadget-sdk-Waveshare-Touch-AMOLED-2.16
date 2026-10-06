@@ -24,6 +24,9 @@ void App::power_tick() {
     if (settings_open()) update_model();
   }
   if (!hal_.display || !hal_.display->info().has_backlight || !screen_timeout_ms_) return;
+  // Plugged into external power: keep the screen on — the idle timeout only
+  // applies on battery. wake_display() is a no-op when already awake.
+  if (power_status_ && power_status_->external_power) { wake_display(); return; }
   const bool idle = mode_ == Mode::Idle && !speaking() && !settings_open() && !talk_held_ && !cancel_held_ &&
                     !prompt_showing() && wifi_setup_text_.empty() && !ota_busy() && ota_ != Ota::Restarting && overlay_ == Overlay::None &&
                     (phase_ == Phase::NoNetwork || (phase_ == Phase::Online && paired_));

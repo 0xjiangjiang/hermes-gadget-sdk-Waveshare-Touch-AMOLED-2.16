@@ -38,4 +38,13 @@ bool Axp2101::enable_aldo1_3v3() {
          write_(0x90, static_cast<uint8_t>(enabled | 0x01));
 }
 
+bool Axp2101::enable_aldo3_3v3() {
+  uint8_t voltage, enabled;
+  if (!read_(0x94, &voltage, 1) || !read_(0x90, &enabled, 1)) return false;
+  // ALDO3: 500 mV + 100 mV per step, enable bit 2 of Output Power Control.
+  // Preserve the other rail controls.
+  return write_(0x94, static_cast<uint8_t>((voltage & 0xe0) | 28)) &&
+         write_(0x90, static_cast<uint8_t>(enabled | 0x04));
+}
+
 }  // namespace hg

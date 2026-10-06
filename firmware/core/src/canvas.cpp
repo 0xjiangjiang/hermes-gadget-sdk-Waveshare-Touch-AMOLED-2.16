@@ -6,6 +6,24 @@
 
 namespace hg {
 
+namespace {
+
+// Column cost of one codepoint: a CJK glyph spans two ASCII cells; anything
+// the CJK font does not have renders as a single '?' column.
+int codepoint_cols(uint32_t cp) {
+  return cp >= 0x80 && font::cjk_glyph(cp, nullptr) ? font::kCjkColumnWidth : 1;
+}
+
+// Punctuation that may not start a line; a break before these instead goes
+// one codepoint earlier so the mark stays with what it belongs to.
+bool closing_punct(uint32_t cp) {
+  return cp == 0xFF0C || cp == 0x3002 || cp == 0x3001 || cp == 0xFF01 || cp == 0xFF1F || cp == 0xFF1A ||
+         cp == 0xFF1B || cp == 0xFF09 || cp == 0x3011 || cp == 0x300D || cp == 0x300F || cp == 0x300B ||
+         cp == 0x2026 || cp == 0x2019 || cp == 0x201D;
+}
+
+}  // namespace
+
 void Canvas::set_clip_rows(int y0, int y1) {
   clip_y0_ = std::max(0, y0);
   clip_y1_ = std::min(h_, y1);
@@ -81,24 +99,45 @@ void Canvas::arc(int cx, int cy, int r, int thickness, int dir, uint16_t color) 
   }
 }
 
-void Canvas::bitmap1(int x, int y, int w, int h, const uint8_t* bits, uint16_t color) {
+void Canvas::bitmap1(int x, int y, int w, int h, const uint8_t* bits, uint16_t color, int scale) {
+  if (scale < 1) scale = 1;
   const int stride = (w + 7) / 8;
   const uint16_t c = encode(color);
-  int y0 = std::max(y, clip_y0_), y1 = std::min(std::min(h_, clip_y1_), y + h);
-  for (int yy = y0; yy < y1; ++yy) {
-    const uint8_t* row = bits + (yy - y) * stride;
-    for (int col = 0; col < w; ++col) {
-      int xx = x + col;
-      if (xx < 0 || xx >= w_) continue;
-      if ((row[col >> 3] >> (7 - (col & 7))) & 1) px_[yy * stride_ + xx] = c;
+  for (int gy = 0; gy < h; ++gy) {
+    const uint8_t* row = bits + gy * stride;
+    for (int gx = 0; gx < w; ++gx) {
+      if (!((row[gx >> 3] >> (7 - (gx & 7))) & 1)) continue;
+      for (int dy = 0; dy < scale; ++dy) {
+        const int py = y + gy * scale + dy;
+        if (py < clip_y0_ || py >= std::min(h_, clip_y1_)) continue;
+        for (int dx = 0; dx < scale; ++dx) {
+          const int px = x + gx * scale + dx;
+          if (px < 0 || px >= w_) continue;
+          px_[py * stride_ + px] = c;
+        }
+      }
     }
   }
 }
 
 int Canvas::text(int x, int y, std::string_view s, int scale, uint16_t color) {
   if (scale < 1) scale = 1;
-  for (char ch : s) {
-    const char* g = font::glyph(ch);
+  const int cjk_advance = font::kCjkColumnWidth * font::kCellWidth * scale;
+  const int cjk_scale = std::max(1, cjk_advance / font::kCjkWidth);
+  for (size_t i = 0; i < s.size();) {
+    const uint32_t cp = font::utf8_next(s, i);
+    const uint8_t* bm = nullptr;
+    if (cp >= 0x80 && font::cjk_glyph(cp, &bm)) {
+      // Render the 16x16 glyph scaled to the 2-cell advance (2x at the usual
+      // scales), centered in the cell and optically aligned with the line.
+      const int cs = std::max(1, cjk_advance / font::kCjkWidth);
+      const int xoff = std::max(0, (cjk_advance - font::kCjkWidth * cs) / 2);
+      const int yoff = std::max(0, (font::kCellHeight * scale - font::kCjkHeight * cs) / 2);
+      bitmap1(x + xoff, y + yoff, font::kCjkWidth, font::kCjkHeight, bm, color, cs);
+      x += cjk_advance;
+      continue;
+    }
+    const char* g = font::glyph(cp < 0x80 ? static_cast<char>(cp) : '?');
     for (int row = 0; row < font::kGlyphHeight; ++row) {
       for (int col = 0; col < font::kGlyphWidth; ++col) {
         if (g[row * font::kGlyphWidth + col] == '#') {
@@ -112,8 +151,12 @@ int Canvas::text(int x, int y, std::string_view s, int scale, uint16_t color) {
 }
 
 int Canvas::text_width(std::string_view s, int scale) {
-  if (s.empty()) return 0;
-  return static_cast<int>(s.size()) * font::kCellWidth * scale - scale;
+  int cols = 0;
+  for (size_t i = 0; i < s.size();) {
+    const uint32_t cp = font::utf8_next(s, i);
+    cols += codepoint_cols(cp);
+  }
+  return cols > 0 ? cols * font::kCellWidth * scale - scale : 0;
 }
 
 int Canvas::line_height(int scale) { return font::kCellHeight * scale; }
@@ -131,40 +174,54 @@ void Canvas::blit(int x, int y, int w, int h, const uint16_t* src) {
 }
 
 std::vector<std::string> wrap_text(std::string_view text, int max_chars) {
+  // Column budget: ASCII costs 1 column, a CJK glyph 2. Lines break at
+  // spaces, between CJK characters (never inside a UTF-8 sequence), or —
+  // when a single word exceeds the line — mid-word, as before.
   std::vector<std::string> lines;
   if (max_chars < 1) max_chars = 1;
   size_t i = 0;
   while (i <= text.size()) {
-    size_t nl = text.find('\n', i);
+    const size_t nl = text.find('\n', i);
     std::string_view para = text.substr(i, nl == std::string_view::npos ? std::string_view::npos : nl - i);
-    std::string line;
-    size_t p = 0;
+
+    size_t line_start = 0, p = 0, last_space = std::string_view::npos, last_cp = std::string_view::npos;
+    int cols = 0;
+    auto flush = [&](size_t end) {
+      std::string out(para.substr(line_start, end - line_start));
+      while (!out.empty() && out.back() == ' ') out.pop_back();
+      lines.push_back(std::move(out));
+    };
+    auto recalc = [&] {
+      cols = 0;
+      for (size_t k = line_start; k < p;) cols += codepoint_cols(font::utf8_next(para, k));
+    };
     while (p < para.size()) {
-      while (p < para.size() && para[p] == ' ') ++p;
-      size_t end = para.find(' ', p);
-      if (end == std::string_view::npos) end = para.size();
-      std::string_view word = para.substr(p, end - p);
-      p = end;
-      if (word.empty()) continue;
-      while (static_cast<int>(word.size()) > max_chars) {
-        if (!line.empty()) {
-          lines.push_back(line);
-          line.clear();
+      const size_t cp_start = p;
+      const uint32_t cp = font::utf8_next(para, p);
+      const int w = codepoint_cols(cp);
+      if (cols + w > max_chars && cols > 0) {
+        if (last_space != std::string_view::npos && last_space > line_start) {
+          flush(last_space);
+          line_start = last_space + 1;  // the space itself does not survive the break
+        } else if (closing_punct(cp) && last_cp != std::string_view::npos && last_cp > line_start) {
+          flush(last_cp);  // kinsoku: the mark stays on the line it closes
+          line_start = last_cp;
+        } else {
+          flush(cp_start);
+          line_start = cp_start;
         }
-        lines.emplace_back(word.substr(0, static_cast<size_t>(max_chars)));
-        word.remove_prefix(static_cast<size_t>(max_chars));
+        last_space = std::string_view::npos;
+        recalc();
       }
-      if (word.empty()) continue;
-      size_t needed = line.empty() ? word.size() : line.size() + 1 + word.size();
-      if (static_cast<int>(needed) > max_chars) {
-        lines.push_back(line);
-        line.assign(word);
+      if (cp == ' ') {
+        if (cols > 0) last_space = cp_start;  // leading spaces never start a line
+        cols += 1;
       } else {
-        if (!line.empty()) line.push_back(' ');
-        line.append(word);
+        last_cp = cp_start;
+        cols += w;
       }
     }
-    lines.push_back(line);
+    flush(para.size());
     if (nl == std::string_view::npos) break;
     i = nl + 1;
   }

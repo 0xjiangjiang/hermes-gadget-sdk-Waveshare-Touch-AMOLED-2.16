@@ -50,10 +50,38 @@ class Hash {
 };
 
 std::string fit(std::string_view s, int max_chars) {
+  // Truncates to max_chars columns (a CJK glyph counts as two) at a UTF-8
+  // boundary; long strings keep the last two columns for "..".
   if (max_chars <= 0) return {};
-  if (static_cast<int>(s.size()) <= max_chars) return std::string(s);
-  if (max_chars <= 2) return std::string(s.substr(0, static_cast<size_t>(max_chars)));
-  return std::string(s.substr(0, static_cast<size_t>(max_chars - 2))) + "..";
+  int cols = 0;
+  size_t i = 0, cut = s.size();
+  for (; i < s.size();) {
+    const size_t start = i;
+    const uint32_t cp = font::utf8_next(s, i);
+    const int w = cp >= 0x80 && font::cjk_glyph(cp, nullptr) ? font::kCjkColumnWidth : 1;
+    if (cols + w > max_chars) {
+      cut = start;
+      break;
+    }
+    cols += w;
+  }
+  if (cut == s.size()) return std::string(s);
+  if (max_chars <= 2) return std::string(s.substr(0, cut));
+  int budget = max_chars - 2;
+  cols = 0;
+  i = 0;
+  cut = s.size();
+  for (; i < s.size();) {
+    const size_t start = i;
+    const uint32_t cp = font::utf8_next(s, i);
+    const int w = cp >= 0x80 && font::cjk_glyph(cp, nullptr) ? font::kCjkColumnWidth : 1;
+    if (cols + w > budget) {
+      cut = start;
+      break;
+    }
+    cols += w;
+  }
+  return std::string(s.substr(0, cut)) + "..";
 }
 
 int cols_for(int width_px, int scale) { return width_px / (font::kCellWidth * scale); }

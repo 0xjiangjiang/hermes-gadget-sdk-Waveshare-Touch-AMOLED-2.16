@@ -1,6 +1,8 @@
 dependencies:
   idf: ">=5.3"
   espressif/esp_websocket_client: "^1.2.3"
+  # Wake word engine (wn9_xiaoaitongxue) for voice wake-up on the 2.16" board.
+  espressif/esp-sr: ">=2.0,<3.0"
   # ES8311 / ES7210 / AW88298 codecs on boards that use them
   espressif/esp_codec_dev: "~1.5"
   espressif/esp_lcd_ili9341: "^2.1.0"

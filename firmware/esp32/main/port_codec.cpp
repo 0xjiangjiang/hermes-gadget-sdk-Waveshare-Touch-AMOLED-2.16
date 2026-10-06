@@ -19,6 +19,9 @@ constexpr size_t kSpeakerBuffer = 48 * 1024;  // ~1.5 s at 16 kHz; the server pa
 constexpr size_t kSpeakerChunk = 512;         // samples per codec write
 constexpr uint8_t kMic1And2 = 0x03;           // ES7210 inputs MIC1 | MIC2 (ES7120_SEL_MIC1 | ES7120_SEL_MIC2)
 
+// The speaker singleton, for the microphone task's echo guard below.
+CodecSpeaker* g_speaker = nullptr;
+
 }  // namespace
 
 // --------------------------------------------------------------------------
@@ -122,7 +125,7 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
   if (out_ && esp_codec_dev_open(out_, &fs) != ESP_CODEC_DEV_OK) out_ = nullptr;
   if (in_ && esp_codec_dev_open(in_, &fs) != ESP_CODEC_DEV_OK) in_ = nullptr;
   if (out_) {
-    esp_codec_dev_set_out_vol(out_, 70);
+    esp_codec_dev_set_out_vol(out_, 100);
     esp_codec_dev_set_out_mute(out_, true);  // unmuted while something plays
   }
   if (in_) esp_codec_dev_set_in_gain(in_, cfg.mic_gain_db);
@@ -159,7 +162,13 @@ void CodecMic::task(void* arg) {
       vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
-    if (self->capturing_) events::post(EventType::Mic, pcm, sizeof(pcm));
+    if (self->capturing_) {
+      events::post(EventType::Mic, pcm, sizeof(pcm));
+    } else if (wake::feed(pcm, kMicChunk) && !(g_speaker && g_speaker->busy())) {
+      // While the speaker plays, detections are echo from our own reply:
+      // the model still sees the stream (staying in sync) but nothing fires.
+      events::post(EventType::Wake);
+    }
   }
 }
 
@@ -169,6 +178,7 @@ void CodecMic::task(void* arg) {
 bool CodecSpeaker::begin(esp_codec_dev_handle_t dev) {
   if (!dev) return false;
   dev_ = dev;
+  g_speaker = this;
   uint8_t* storage = static_cast<uint8_t*>(heap_caps_malloc(kSpeakerBuffer + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   static StaticStreamBuffer_t control;
   if (storage) buffer_ = xStreamBufferCreateStatic(kSpeakerBuffer, 1, storage, &control);
