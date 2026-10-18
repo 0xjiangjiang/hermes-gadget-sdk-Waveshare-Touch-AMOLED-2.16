@@ -23,11 +23,14 @@
 > **🔧 This branch (`216-board`): Waveshare ESP32-S3-Touch-AMOLED-2.16 custom build.**
 > Adds full Chinese support and board tuning on top of upstream v0.2.0:
 > GB2312 on-screen font (Chinese replies render properly), hands-free Chinese
-> wake words（小爱同学 / 你好小智, via ESP-SR）, per-board mic gain & VAD
+> wake word（小爱同学, via ESP-SR WakeNet9; other models supported at build
+> time）, per-board mic gain & VAD
 > tuning for desk-distance speech, default volume 100, and a screen-always-on
 > option. Flashing guide (中文):
 > [`docs/local-flash-216.zh-CN.md`](docs/local-flash-216.zh-CN.md) · Prebuilt
-> binaries: see [Releases](releases). Attribution & licenses: [`NOTICE`](NOTICE).
+> binaries: see
+> [Releases](https://github.com/0xjiangjiang/hermes-gadget-sdk-Waveshare-Touch-AMOLED-2.16/releases).
+> Attribution & licenses: [`NOTICE`](NOTICE).
 >
 > 本分支是为**微雪 ESP32-S3-Touch-AMOLED-2.16**做的中文定制版：中文屏显字库、
 > 中文唤醒词免提、本板麦克风调优、默认满音量、可常亮。其余用法与上游一致。
