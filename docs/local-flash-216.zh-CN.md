@@ -37,7 +37,8 @@ pio run -e esp32s3-touch-amoled-216
 esptool.py --chip esp32s3 -p <串口> -b 921600 write_flash \
   0x0      bootloader.bin \
   0x8000   partition_table.bin \
-  0x10000  firmware.bin \
+  0xf000   ota_data_initial.bin \
+  0x20000  hermes_gadget.bin \
   0x400000 srmodels.bin
 ```
 
